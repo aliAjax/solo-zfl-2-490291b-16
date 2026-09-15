@@ -289,19 +289,76 @@ check('固定顺序 R0..Rn → C0..Cn，结果确定且不重复非禁用', () =
     '必须在清单内且非禁用');
   assert(r1.suggestions.length === 0, '充足时不应有放宽建议');
 });
-check('RP2040 14+14=28 > 26 可用 → 无解并给出最少放开 GP23、GP24', () => {
+check('RP2040 14+14=28 > 26 可用 → 无解，可行范围内列最少放开 GP23、GP24', () => {
   const r = autoAssignPins(14, 14, true, RP.id);
   assert(r.pins.length === 2, '分体板两个半区各算一次');
   assert(r.suggestions.length === 2, '左右半区各应有 1 条放宽建议');
   for (const s of r.suggestions) {
-    assert(s.available === 26 && s.required === 28, `可用 26 / 需要 28，实际 ${s.available}/${s.required}`);
+    assert(s.available === 26 && s.required === 28 && s.shortage === 2,
+      `可用 26 / 需要 28 / 缺口 2，实际 ${s.available}/${s.required}/${s.shortage}`);
+    assert(s.feasible === true, '缺口 2 个、有 4 个禁用候选，应为可行单组放宽');
+    assert(s.unblockPins.length === 2, '可行时放开脚数量必须恰好等于缺口，不能多也不能少');
     assert(JSON.stringify(s.unblockPins) === JSON.stringify(['GP23', 'GP24']),
       '最少放宽应为固定顺序前 2 个禁用脚 GP23、GP24：' + s.unblockPins);
+    assert(/再放开 2 个禁用脚（GP23、GP24）即可满足/.test(s.message), '消息数量与列表必须对得上');
   }
   const cfg = baseConfig({ rows: 14, cols: 14, keys: fullKeys(14, 14), pins: r.pins });
   const a = analyzeMatrix(cfg);
   assert(findIssue(a, 'no-solution'), '分析应报 no-solution');
-  assert(/最少放宽/.test(a.issues.find((i) => i.code === 'no-solution').message), '无解消息须说明最少放宽');
+  assert(/放开.*GP23.*GP24/.test(a.issues.find((i) => i.code === 'no-solution').message),
+    '无解消息须列出最少放开项');
+});
+check('【用户场景】20×20 分体需 40 脚，RP2040 仅 26 个非禁用脚：明确说明放开 4 个禁用脚仍缺 10 个', () => {
+  const r = autoAssignPins(20, 20, true, RP.id);
+  assert(r.suggestions.length === 2, '左右半区各无解');
+  for (const s of r.suggestions) {
+    assert(s.required === 40 && s.available === 26 && s.shortage === 14,
+      `应为 26/40/缺口14，实际 ${s.available}/${s.required}/${s.shortage}`);
+    assert(s.feasible === false, '只有 4 个禁用脚，放开也补不上 14 的缺口，必须不可行');
+    assert(JSON.stringify(s.unblockPins) === JSON.stringify(['GP23', 'GP24', 'GP25', 'GP29']),
+      '不可行时应列出全部 4 个禁用脚，而不是假装能列 14 个：' + s.unblockPins);
+    assert(/放开全部 4 个禁用脚（GP23、GP24、GP25、GP29）/.test(s.message), '消息须点名全部 4 个禁用脚');
+    assert(/仍缺 10 个引脚/.test(s.message), '须明确仍缺 10 个：' + s.message);
+    assert(/减少 10 条/.test(s.message), '须给出至少要减少的线数 10：' + s.message);
+    assert(/更换引脚更多的开发板/.test(s.message), '须给出换板选项');
+    assert(!/再放开 14 个/.test(s.message), '绝不能出现数量对不上的「再放开 14 个」建议');
+  }
+  const cfg = baseConfig({ rows: 20, cols: 20, keys: fullKeys(20, 20), pins: r.pins });
+  const a = analyzeMatrix(cfg);
+  const noSol = a.issues.find((i) => i.code === 'no-solution');
+  assert(noSol && /仍缺 10 个引脚/.test(noSol.message), '分析器的无解消息同样必须自洽');
+});
+check('临界 13+14=27：缺口 1，最少放开仅 GP23 一个脚', () => {
+  const r = autoAssignPins(13, 14, true, RP.id);
+  for (const s of r.suggestions) {
+    assert(s.shortage === 1 && s.feasible, '应判为可行单组放宽');
+    assert(JSON.stringify(s.unblockPins) === JSON.stringify(['GP23']), '只放开 1 个：' + s.unblockPins);
+    assert(/再放开 1 个禁用脚（GP23）即可/.test(s.message), '消息应精确到 1 个脚');
+  }
+});
+check('缺口恰等于禁用脚数（15+15=30，缺 4）：放开全部 4 个即满足，仍属可行', () => {
+  const r = autoAssignPins(15, 15, true, RP.id);
+  for (const s of r.suggestions) {
+    assert(s.shortage === 4 && s.feasible === true, '缺 4 且恰有 4 候选应为可行');
+    assert(s.unblockPins.length === 4, '放开项必须是 4 个');
+  }
+});
+check('可用脚恰好够用（13+13=26）：无建议，固定顺序占满非禁用脚', () => {
+  const r = autoAssignPins(13, 13, true, RP.id);
+  assert(r.suggestions.length === 0, '26 脚恰好满足，不应有无解建议');
+  const L = r.pins.find((p) => p.half === 'L');
+  const all = [...L.rowPins, ...L.colPins];
+  assert(all.length === 26 && new Set(all).size === 26, '应占满 26 个不重复脚');
+  assert(all.every((p) => !RP.disabledPins.includes(p)), '不能动用禁用脚');
+});
+check('BlackPill 20+20=40 > 29 可用、仅 6 禁用脚：放开全部仍缺 5 个，要求减 5 条', () => {
+  const r = autoAssignPins(20, 20, false, 'blackpill-stm32f401');
+  const s = r.suggestions[0];
+  assert(s.required === 40 && s.available === 29 && s.shortage === 11, `应为 29/40/11，实际 ${s.available}/${s.required}/${s.shortage}`);
+  assert(s.feasible === false, '6 个禁用候选补不了 11 的缺口');
+  assert(s.unblockPins.length === 6, '只列得出现有的 6 个禁用脚，不能虚构引脚');
+  assert(/放开全部 6 个禁用脚/.test(s.message) && /仍缺 5 个引脚/.test(s.message), '数量必须自洽：' + s.message);
+  assert(/降至 35 条以内/.test(s.message), '应给出减线后的目标总数 29+6=35');
 });
 check('Pro Micro 8+8=16 恰好等于可用脚数，可分配（18 脚中 D0/D1 禁用）', () => {
   const r = autoAssignPins(8, 8, false, PM.id);
@@ -309,12 +366,6 @@ check('Pro Micro 8+8=16 恰好等于可用脚数，可分配（18 脚中 D0/D1 �
   const L = r.pins[0];
   assert(L.rowPins.length === 8 && L.colPins.length === 8, '行列线数应齐全');
   assert(![...L.rowPins, ...L.colPins].includes('D0'), '禁用脚 D0 不应被分配');
-});
-check('超过开发板总引脚数时 unblockPins 只列得出的候选（如实说明无候选）', () => {
-  const r = autoAssignPins(20, 20, false, 'blackpill-stm32f401');
-  const s = r.suggestions[0];
-  assert(s.required === 40 && s.available === 29, `应为 29/40，实际 ${s.available}/${s.required}`);
-  assert(s.unblockPins.length === 6, '只有 6 个禁用脚可放开，不能虚构引脚');
 });
 
 console.log('\n[9] 调整后重算 / 板型切换裁剪');
@@ -392,6 +443,48 @@ check('带矩阵配置的导出信封可往返，且坏矩阵被规整而不拖�
   assert(m && m.rows === 3 && m.cols === 4 && m.keys.length === 24,
     '矩阵数据应完整往返（' + (m ? `${m.rows}x${m.cols}/${m.keys?.length}` : 'missing') + '）');
   assert(m.pins.length === 2 && m.pins[0].rowPins.length === 3, '左右半区引脚应一同往返');
+});
+
+check('旧版矩阵备份（无新字段、引脚为历史写死值）恢复时照常规整并能分析', () => {
+  // 模拟旧版本写入 localStorage / 备份栈里的 MatrixConfig：没有版本外的任何新字段
+  const legacyBackup = {
+    version: 1,
+    boardId: RP.id,
+    rows: 2,
+    cols: 3,
+    expectedKeyCount: 12,
+    split: true,
+    diodeMode: 'per-key',
+    diodeDirection: 'col2row',
+    keys: fullKeys(2, 3),
+    pins: [
+      { half: 'L', rowPins: ['GP0', 'GP1'], colPins: ['GP2', 'GP3', 'GP4'] },
+      { half: 'R', rowPins: ['GP0', 'GP1'], colPins: ['GP2', 'GP3', 'GP4'] },
+    ],
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  };
+  const m = normalizeMatrixConfig(legacyBackup);
+  assert(m, '旧备份应能规整');
+  const a = analyzeMatrix(m);
+  assert(a.valid, '合法的旧备份分析应通过：' + a.issues.map((i) => i.message).join(' / '));
+  assert(a.suggestions.every((s) => 'feasible' in s && 'shortage' in s),
+    '运行时生成的建议始终带新字段，旧数据无需迁移');
+});
+check('含禁用脚/重复脚的旧备份恢复后问题被如实标出（不会静默放行）', () => {
+  const legacyBackup = {
+    version: 1, boardId: RP.id, rows: 2, cols: 2, expectedKeyCount: 4,
+    split: false, diodeMode: 'none', diodeDirection: 'col2row',
+    keys: fullKeys(2, 2, ['L']),
+    pins: [{
+      half: 'L',
+      rowPins: ['GP0', 'GP23'],          // 历史错误：用了禁用脚
+      colPins: ['GP1', 'GP0'],           // 历史错误：GP0 与行线重复
+    }],
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  };
+  const a = analyzeMatrix(normalizeMatrixConfig(legacyBackup));
+  assert(findIssue(a, 'pin-disabled', (i) => i.pin === 'GP23'), '旧备份里的禁用脚仍应被拦');
+  assert(findIssue(a, 'pin-duplicate', (i) => i.pin === 'GP0'), '旧备份里的重复脚仍应被拦');
 });
 
 console.log('\n[11] 各开发板预设合理性');

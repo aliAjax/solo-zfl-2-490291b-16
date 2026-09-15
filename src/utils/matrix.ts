@@ -89,6 +89,40 @@ function usablePins(preset: BoardPreset): string[] {
   return preset.pinOrder.filter((p) => !disabled.has(p));
 }
 
+/**
+ * 构造「无解时的最少放宽建议」。
+ * feasible=true：放开 unblockPins（恰为 shortage 个）即可补齐缺口；
+ * feasible=false：即使放开全部现有禁用脚仍缺脚，unblockPins 列出全部禁用脚，
+ *                 消息明确要求减线或换板，不再给出数量对不上的建议。
+ */
+function buildRelaxationSuggestion(
+  preset: BoardPreset,
+  half: HalfId,
+  rows: number,
+  cols: number,
+  available: number,
+): RelaxationSuggestion {
+  const required = rows + cols;
+  const shortage = required - available;
+  const boardName = preset.label.split('（')[0];
+  const candidates = preset.disabledPins.filter((p) => preset.pinOrder.includes(p));
+  const feasible = candidates.length >= shortage;
+  const unblockPins = feasible ? candidates.slice(0, shortage) : [...candidates];
+  const head = `${halfLabel(half)}无解：需要 ${required} 个独立引脚（${rows} 行 + ${cols} 列），`
+    + `${boardName} 只有 ${available} 个非禁用脚。`;
+
+  const message = feasible
+    ? head
+      + `最少放宽：按固定顺序再放开 ${shortage} 个禁用脚（${unblockPins.join('、')}）即可满足；`
+      + '或将行列线总数减到当前可用脚以内，或更换开发板。'
+    : head
+      + `即使放开全部 ${candidates.length} 个禁用脚（${candidates.join('、') || '无'}）也仍缺 `
+      + `${shortage - candidates.length} 个引脚，单组放宽无法解决。`
+      + `请至少把行列线减少 ${shortage - candidates.length} 条（总数降至 ${available + candidates.length} 条以内），或更换引脚更多的开发板。`;
+
+  return { half, available, required, shortage, feasible, unblockPins, message };
+}
+
 /* ------------------------------------------------------------------ */
 /* 默认配置 / 兼容读取                                                   */
 /* ------------------------------------------------------------------ */
@@ -225,20 +259,7 @@ export function autoAssignPins(
       colPins.push(...picked.slice(Math.max(rows, 0), needed));
 
       if (picked.length < needed) {
-        const shortage = needed - picked.length;
-        const unblockPins = preset.disabledPins
-          .filter((p) => preset.pinOrder.includes(p))
-          .slice(0, shortage);
-        suggestions.push({
-          half,
-          available: pool.length,
-          required: needed,
-          unblockPins,
-          message: `${halfLabel(half)}需要 ${needed} 个引脚（${rows} 行 + ${cols} 列），`
-            + `${preset.label.split('（')[0]} 仅有 ${pool.length} 个非禁用脚；`
-            + `最少需再放开 ${shortage} 个禁用脚（固定顺序：${unblockPins.join('、') || '无可用候选'}），`
-            + '或减小行列数 / 换用引脚更多的开发板。',
-        });
+        suggestions.push(buildRelaxationSuggestion(preset, half, rows, cols, pool.length));
       }
     }
     pins.push({ half, rowPins, colPins });
@@ -578,20 +599,9 @@ export function analyzeMatrix(config: MatrixConfig): MatrixAnalysis {
       const pool = usablePins(preset);
       const needed = config.rows + config.cols;
       if (pool.length < needed) {
-        const shortage = needed - pool.length;
-        const unblockPins = preset.disabledPins
-          .filter((p) => preset.pinOrder.includes(p))
-          .slice(0, shortage);
-        const suggestion: RelaxationSuggestion = {
-          half,
-          available: pool.length,
-          required: needed,
-          unblockPins,
-          message: `${halfLabel(half)}无解：需要 ${needed} 个独立引脚（${config.rows} 行 + ${config.cols} 列），`
-            + `${preset.label.split('（')[0]} 只有 ${pool.length} 个非禁用脚。`
-            + `最少放宽：按固定顺序再放开 ${shortage} 个禁用脚（${unblockPins.join('、') || '无候选'}）`
-            + `，或将行列线减至 ${pool.length} 条以内，或更换开发板。`,
-        };
+        const suggestion = buildRelaxationSuggestion(
+          preset, half, config.rows, config.cols, pool.length,
+        );
         suggestions.push(suggestion);
         issues.push({
           level: 'error',

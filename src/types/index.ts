@@ -170,11 +170,19 @@ export interface MatrixIssue {
 
 export interface RelaxationSuggestion {
   half: HalfId;
-  /** 当前可用引脚数 */
+  /** 当前非禁用引脚数 */
   available: number;
   /** 需要引脚数 */
   required: number;
-  /** 最少需要放开（取消禁用）的引脚名（按固定顺序挑选） */
+  /** 引脚缺口（required - available） */
+  shortage: number;
+  /**
+   * 放开列出的禁用脚后能否单独补齐缺口。
+   * true = 放开 unblockPins 即有解；
+   * false = 即便放开全部现有禁用脚仍缺脚，必须减线或换板。
+   */
+  feasible: boolean;
+  /** 建议放开的禁用脚（固定顺序）；feasible 时数量等于 shortage，否则为全部禁用脚 */
   unblockPins: string[];
   message: string;
 }
