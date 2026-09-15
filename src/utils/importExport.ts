@@ -7,6 +7,7 @@ import {
   PLATE_MATERIALS,
   CASE_MATERIALS,
 } from '@/types';
+import { normalizeMatrixConfig } from '@/utils/matrix';
 
 export const EXPORT_FORMAT_VERSION = 1;
 export const EXPORT_FORMAT_MAGIC = 'keyfeeling-export';
@@ -105,6 +106,14 @@ export function genNewId(): string {
   return 'log-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '-' + Math.random().toString(36).slice(2, 6);
 }
 
+/** 导入时宽松规整矩阵检查台数据：结构合法则保留，否则丢弃该附加字段，不影响主记录 */
+function withNormalizedMatrix(log: KeyboardLog): KeyboardLog {
+  const raw = (log as { matrixCheck?: unknown }).matrixCheck;
+  if (raw === undefined || raw === null) return log;
+  const m = normalizeMatrixConfig(raw);
+  return m ? { ...log, matrixCheck: m } : log;
+}
+
 function validateLog(raw: unknown): { valid: boolean; reason?: string } {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return { valid: false, reason: '不是有效的对象' };
@@ -159,7 +168,9 @@ export function extractLogsFromJson(rawJson: string): KeyboardLog[] {
   }
 
   if (Array.isArray(parsed)) {
-    return parsed.filter((item): item is KeyboardLog => validateLog(item).valid);
+    return parsed
+      .filter((item): item is KeyboardLog => validateLog(item).valid)
+      .map((item) => withNormalizedMatrix(item));
   }
 
   if (
@@ -170,7 +181,9 @@ export function extractLogsFromJson(rawJson: string): KeyboardLog[] {
     'data' in parsed &&
     Array.isArray((parsed as { data: unknown }).data)
   ) {
-    return (parsed as { data: unknown[] }).data.filter((item): item is KeyboardLog => validateLog(item).valid);
+    return (parsed as { data: unknown[] }).data
+      .filter((item): item is KeyboardLog => validateLog(item).valid)
+      .map((item) => withNormalizedMatrix(item));
   }
 
   return [];
@@ -224,7 +237,7 @@ export function parseImportData(rawJson: string, existingIds: string[]): ImportP
     }
     seenIds.add(log.id);
 
-    fileValidLogs.push(log);
+    fileValidLogs.push(withNormalizedMatrix(log));
   });
 
   void existingIds;

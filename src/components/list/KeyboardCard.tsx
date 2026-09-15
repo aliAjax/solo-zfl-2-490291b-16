@@ -1,4 +1,4 @@
-import { Pencil, Trash2, Eye } from 'lucide-react';
+import { Pencil, Trash2, Eye, Grid3X3 } from 'lucide-react';
 import type { KeyboardLog } from '@/types';
 import {
   SWITCH_TYPE_LABELS,
@@ -6,15 +6,25 @@ import {
 } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { getRatingGradient, formatDate } from '@/utils/helpers';
+import { analyzeMatrix, countIssues, normalizeMatrixConfig } from '@/utils/matrix';
 
 interface Props {
   log: KeyboardLog;
   index: number;
 }
 
+function matrixStatus(log: KeyboardLog) {
+  if (!log.matrixCheck) return null;
+  const cfg = normalizeMatrixConfig(log.matrixCheck);
+  if (!cfg) return null;
+  const { errors, warnings } = countIssues(analyzeMatrix(cfg));
+  return { errors, warnings };
+}
+
 export default function KeyboardCard({ log, index }: Props) {
-  const { ui, toggleCompareSelect, openFormModal, openDetail, deleteLog } = useAppStore();
+  const { ui, toggleCompareSelect, openFormModal, openDetail, openMatrixCheck, deleteLog } = useAppStore();
   const selected = ui.selectedForCompare.includes(log.id);
+  const mStatus = matrixStatus(log);
 
   const typeColorMap: Record<string, string> = {
     linear: 'bg-slateblue-500/20 text-slateblue-400 border-slateblue-500/30',
@@ -82,6 +92,27 @@ export default function KeyboardCard({ log, index }: Props) {
           </span>
           <span className="chip chip-inactive">{log.keycapMaterial}</span>
           <span className="chip chip-inactive">{log.plateMaterial}板</span>
+          {mStatus && (
+            <span
+              className={`chip border ${
+                mStatus.errors > 0
+                  ? 'bg-wine-500/15 text-wine-400 border-wine-500/30'
+                  : mStatus.warnings > 0
+                    ? 'bg-brass-300/15 text-brass-200 border-brass-300/30'
+                    : 'bg-moss-500/15 text-moss-400 border-moss-500/30'
+              }`}
+              title={
+                mStatus.errors > 0
+                  ? `矩阵检查有 ${mStatus.errors} 个错误`
+                  : mStatus.warnings > 0
+                    ? `矩阵检查有 ${mStatus.warnings} 个警告`
+                    : '矩阵检查已通过'
+              }
+            >
+              <Grid3X3 className="h-3 w-3" />
+              {mStatus.errors > 0 ? `${mStatus.errors} 错` : mStatus.warnings > 0 ? `${mStatus.warnings} 警` : '矩阵 ✓'}
+            </span>
+          )}
         </div>
 
         <div className="space-y-2.5 mb-4">
@@ -181,6 +212,24 @@ export default function KeyboardCard({ log, index }: Props) {
             {selected ? '✓ 已选对比' : '加入对比'}
           </button>
           <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                openMatrixCheck(log);
+              }}
+              className={`p-1.5 rounded-md transition-all ${
+                mStatus
+                  ? mStatus.errors > 0
+                    ? 'text-wine-400 bg-wine-500/10'
+                    : mStatus.warnings > 0
+                      ? 'text-brass-200 bg-brass-300/10'
+                      : 'text-moss-400 bg-moss-500/10'
+                  : 'text-ink-500 hover:text-brass-200 hover:bg-brass-300/10'
+              }`}
+              title="配列矩阵 / 引脚检查台"
+            >
+              <Grid3X3 className="h-4 w-4" />
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();

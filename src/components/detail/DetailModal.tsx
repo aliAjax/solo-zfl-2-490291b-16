@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Pencil, Trash2, Calendar } from 'lucide-react';
+import { X, Pencil, Trash2, Calendar, Grid3X3, CheckCircle2, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { SWITCH_TYPE_LABELS, SOUND_CHARACTER_LABELS } from '@/types';
 import { getRatingGradient, formatDate } from '@/utils/helpers';
+import { analyzeMatrix, countIssues, halfLabel, normalizeMatrixConfig } from '@/utils/matrix';
 
 export default function DetailModal() {
-  const { ui, closeDetail, openFormModal, deleteLog } = useAppStore();
-  const log = ui.detailLog;
+  const { ui, logs, closeDetail, openFormModal, openMatrixCheck, deleteLog } = useAppStore();
+  // 读取实时数据：在检查台保存矩阵配置后，详情里的状态能立即更新
+  const log = ui.detailLog ? logs.find((l) => l.id === ui.detailLog!.id) ?? ui.detailLog : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -53,6 +55,10 @@ export default function DetailModal() {
       deleteLog(log.id);
     }
   };
+
+  const matrixCfg = normalizeMatrixConfig(log.matrixCheck);
+  const matrixSummary = matrixCfg ? analyzeMatrix(matrixCfg) : null;
+  const matrixCounts = matrixSummary ? countIssues(matrixSummary) : null;
 
   return createPortal(
     <div
@@ -174,6 +180,79 @@ export default function DetailModal() {
               </div>
             </>
           )}
+
+          <div className="divider" />
+
+          <div className="space-y-3">
+            <h3 className="font-mono text-sm font-semibold text-brass-200 flex items-center gap-2">
+              <span className="w-1 h-4 rounded bg-brass-300" />
+              配列矩阵 · 引脚检查台
+            </h3>
+            <button
+              onClick={() => openMatrixCheck(log)}
+              className="w-full text-left rounded-xl border border-ink-700/70 bg-ink-900/50 hover:border-brass-300/40 hover:bg-brass-300/5 transition-colors p-4"
+            >
+              {matrixCfg && matrixSummary && matrixCounts ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm text-ink-100 mb-1">
+                      <Grid3X3 className="h-4 w-4 text-brass-300 shrink-0" />
+                      <span className="truncate">
+                        {matrixCfg.rows} × {matrixCfg.cols}
+                        {matrixCfg.split ? ' · 分体左右' : ' · 一体'} · {matrixSummary.keyCount} 键
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-ink-500 leading-relaxed">
+                      {matrixCfg.diodeMode === 'none'
+                        ? '无二极管矩阵'
+                        : `每键二极管 · 整体方向 ${matrixCfg.diodeDirection === 'col2row' ? '列→行' : '行→列'}`}
+                      {' · '}
+                      半区{
+                        matrixCfg.split
+                          ? (['L', 'R'] as const).map((h) => {
+                              const pa = matrixCfg.pins.find((p) => p.half === h);
+                              return `${halfLabel(h)} ${pa?.rowPins.filter(Boolean).length ?? 0}行/${pa?.colPins.filter(Boolean).length ?? 0}列`;
+                            }).join('，')
+                          : (() => {
+                              const pa = matrixCfg.pins.find((p) => p.half === 'L');
+                              return `${pa?.rowPins.filter(Boolean).length ?? 0} 行 / ${pa?.colPins.filter(Boolean).length ?? 0} 列引脚`;
+                            })()
+                      }
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex flex-col items-end gap-1">
+                    {matrixCounts.errors > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-mono text-wine-400">
+                        <ShieldAlert className="h-4 w-4" />
+                        {matrixCounts.errors} 个错误
+                      </span>
+                    ) : matrixCounts.warnings > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-mono text-brass-200">
+                        <AlertTriangle className="h-4 w-4" />
+                        {matrixCounts.warnings} 个警告
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-mono text-moss-400">
+                        <CheckCircle2 className="h-4 w-4" />
+                        检查通过
+                      </span>
+                    )}
+                    <span className="text-[10px] text-ink-600 font-mono">
+                      更新 {formatDate(matrixCfg.updatedAt)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm text-ink-300">
+                    <Grid3X3 className="h-4 w-4 text-brass-300" />
+                    尚未登记配列矩阵与控制器引脚
+                  </div>
+                  <span className="text-xs text-brass-200 font-mono">打开检查台 →</span>
+                </div>
+              )}
+            </button>
+          </div>
 
           {log.notes && (
             <>
